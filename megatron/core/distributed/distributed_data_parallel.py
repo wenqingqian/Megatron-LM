@@ -329,6 +329,12 @@ class DistributedDataParallel(_BaseDataParallel):
                     for param in bucket.params_list:
                         self.param_to_bucket_group[param] = bucket_group
 
+        # SGA narrow waist call point 1: attach bucket state to the plugin
+        # engine (no-op unless --sga-config was given).
+        from megatron.core import sga_waist
+
+        sga_waist.attach(self)
+
         # Delete references to weight_tensor if they exist since we don't want two parameter copies
         # if we re-mapped parameters (which happens when we use the distributed optimizer).
         # This is a temporary workaround around a TE bug that is fixed with

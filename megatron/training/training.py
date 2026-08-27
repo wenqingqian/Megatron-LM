@@ -2177,8 +2177,15 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                                      (iteration + 1) % args.save_dgrads_interval == 0)
     while rerun_state_machine.should_run_forward_backward(data_iterator):
         # Set grad to zero.
+        from megatron.core import sga_waist
+
         for model_chunk in model:
-            model_chunk.zero_grad_buffer()
+            # SGA narrow waist static guard: when the engine is active it has
+            # already performed the post-update buffer reset at the end of the
+            # previous optimizer step (selective on success, full on failure),
+            # so the dense zero must not destroy residuals.
+            if not sga_waist.active():
+                model_chunk.zero_grad_buffer()
             # If saving main_grads in this iteration, then all-reduce instead of reduce-scatter.
             model_chunk.force_all_reduce = save_wgrads_in_this_iteration
         optimizer.zero_grad()
@@ -2284,7 +2291,15 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     # Update parameters.
 
     timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
-    update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+    from megatron.core import sga_waist
+
+    _sga_result = sga_waist.optimizer_step(optimizer, model, iteration)
+    if _sga_result is None:
+        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+    else:
+        # SGA narrow waist call point 3: engine-owned step with stock return
+        # semantics; it also performed the post-update selective reset.
+        update_successful, grad_norm, num_zeros_in_grad = _sga_result
 
     # get max attention logit for logging and run clip_qk()
     # Part of MuonClip Optimizer step

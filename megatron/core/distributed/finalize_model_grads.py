@@ -494,8 +494,14 @@ def finalize_model_grads(
     # All-reduce / reduce-scatter across DP replicas.
     if config.timers is not None:
         config.timers('all-grads-sync', log_level=1).start(barrier=config.barrier_with_L1_time)
+    from megatron.core import sga_waist
+
     for model_chunk in model:
-        model_chunk.finish_grad_sync(force_all_reduce=force_all_reduce)
+        # SGA narrow waist call point 2: selective sync. The engine handles
+        # every bucket group when it returns True (sparse collectives, or
+        # delegation to the dense path on full-sync steps).
+        if not sga_waist.grad_sync(model_chunk, force_all_reduce):
+            model_chunk.finish_grad_sync(force_all_reduce=force_all_reduce)
     if config.timers is not None:
         config.timers('all-grads-sync').stop()
 
