@@ -2,13 +2,13 @@
 """SGA narrow waist (API v1).
 
 The ONLY bridge between Megatron-LM and the SGA plugin framework: a config
-exit plus three runtime call points and one static guard, all defined in
-AGENTSPACE/notes/sga-waist-api-v1.md. This module contains no scheme code
+exit plus three runtime call points and one static guard. This module
+contains no scheme code
 and no scheme names; it lazily imports the external ``sga`` package (the
 SGA repository, expected on PYTHONPATH) and delegates everything to a
 single engine object built from the opaque ``--sga-config`` JSON.
 
-Contract highlights (full normative text lives in the API note):
+Contract highlights:
   - Without ``--sga-config`` every entry point is a no-op and the ``sga``
     package is never imported (stock runs must not require it).
   - With ``--sga-config`` set but the ``sga`` package unimportable, the
