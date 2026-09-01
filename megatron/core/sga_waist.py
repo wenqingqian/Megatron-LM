@@ -33,7 +33,7 @@ def add_sga_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     group.add_argument(
         '--sga-config', type=str, default='', dest='sga_config',
         help='Canonical (sorted-key) JSON string describing the SGA four-field '
-             'plugin configuration (score/selection/error_feedback/backend). '
+             'plugin configuration (score/selection/optimizer/backend). '
              'Empty (default) disables SGA entirely.',
     )
     group.add_argument(
