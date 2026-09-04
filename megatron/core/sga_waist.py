@@ -1,46 +1,57 @@
 # Copyright (c) 2026, SGA framework team
-"""SGA narrow waist (API v1).
+"""SGA narrow waist (API v2).
 
-The ONLY bridge between Megatron-LM and the SGA plugin framework: a config
-exit plus three runtime call points and one static guard. This module
-contains no scheme code
-and no scheme names; it lazily imports the external ``sga`` package (the
-SGA repository, expected on PYTHONPATH) and delegates everything to a
-single engine object built from the opaque ``--sga-config`` JSON.
+The ONLY bridge between Megatron-LM and the SGA plugin framework: an
+arguments exit plus three runtime call points and one static guard. This
+module contains no scheme code and no scheme names; it lazily imports
+the external ``sga`` package (the SGA repository, expected on PYTHONPATH)
+and delegates everything to a single engine object.
+
+Config transport (v2): FLAGS ARE THE TRANSPORT. The training entry
+registers the flat ``--sga-*`` vocabulary on megatron's argparse
+(``sga/config/arguments.py`` in the SGA repo, via the entry's
+extra_args_provider); after parsing, the configuration simply LIVES on
+the args namespace as ``sga_*`` attributes. This waist collects those
+attributes — the ``sga_`` prefix and its own override switch are all it
+knows; the vocabulary itself stays in the SGA repo — and hands the flat
+dict to ``build_engine``. There is no JSON string and no re-serialization
+(anything checkpointable rides inside the checkpointed args namespace,
+which is exactly what the v1 JSON bought).
 
 Contract highlights:
-  - Without ``--sga-config`` every entry point is a no-op and the ``sga``
-    package is never imported (stock runs must not require it).
-  - With ``--sga-config`` set but the ``sga`` package unimportable, the
-    failure surfaces at engine-build time (first attach), never at the
-    first optimizer step.
+  - Without ``sga_enabled`` true (stock runs carry no SGA attributes at
+    all) every entry point is a no-op and the ``sga`` package is never
+    imported (stock runs must not require it).
+  - With SGA active but the ``sga`` package unimportable, the failure
+    surfaces at engine-build time (first attach), never at the first
+    optimizer step.
   - ``grad_sync`` does not take an iteration: the engine tracks iteration
     internally and advances it only on successful optimizer steps.
 """
 
 import argparse
-import json
 
-SGA_API_VERSION = 1
+SGA_API_VERSION = 2
 
 _engine = None
 _engine_failed = False
 
 
 def add_sga_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """Config-extension exit: one opaque JSON argument (schema-stable as plugins grow)."""
+    """Arguments exit: the resume-override switch only.
+
+    The ``--sga-*`` config vocabulary is registered by the SGA training
+    entry's own extra_args_provider (the SGA repo owns its declarations);
+    this fork-side exit exists so a resume may be forced past the config
+    guard without any SGA import.
+    """
     group = parser.add_argument_group('SGA')
-    group.add_argument(
-        '--sga-config', type=str, default='', dest='sga_config',
-        help='Canonical (sorted-key) JSON string describing the SGA four-field '
-             'plugin configuration (score/selection/optimizer/backend). '
-             'Empty (default) disables SGA entirely.',
-    )
     group.add_argument(
         '--sga-allow-config-override', action='store_true',
         dest='sga_allow_config_override',
-        help='Allow resuming from a checkpoint whose saved sga_config differs '
-             'from the current one (refused by default).',
+        help='Allow resuming from a checkpoint whose saved sga '
+             'configuration differs from the current one (refused by '
+             'default).',
     )
     return parser
 
@@ -48,16 +59,17 @@ def add_sga_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 def _config_from_args():
     from megatron.training import get_args
 
-    raw = getattr(get_args(), 'sga_config', '')
-    if not raw:
+    args = get_args()
+    if getattr(args, 'sga_enabled', False) is not True:
         return None
-    try:
-        config = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f'--sga-config is not valid JSON: {e}') from e
-    if not isinstance(config, dict):
-        raise ValueError('--sga-config must decode to a JSON object')
-    return config
+    # Collect every sga_* attribute (argparse defaults included — the SGA
+    # package diffs them against its declared defaults). The non-config
+    # sga_ keys are this waist's own override switch and the retired v1
+    # JSON-transport key (still present on old checkpoints); the
+    # fork-registered-key set stays pinned by the SGA-side invariant tests.
+    skip = ('sga_allow_config_override', 'sga_config')
+    return {key: value for key, value in vars(args).items()
+            if key.startswith('sga_') and key not in skip}
 
 
 def _get_engine():
@@ -73,8 +85,9 @@ def _get_engine():
     except ImportError as e:
         _engine_failed = True
         raise ImportError(
-            '--sga-config is set but the sga package cannot be imported '
-            f'({e}); is the SGA repository on PYTHONPATH (source env.sh)?'
+            'SGA is enabled (sga_enabled) but the sga package cannot be '
+            f'imported ({e}); is the SGA repository on PYTHONPATH '
+            '(source env.sh)?'
         ) from e
     _engine = build_engine(config, api_version=SGA_API_VERSION)
     return _engine

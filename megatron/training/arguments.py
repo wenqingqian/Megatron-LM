@@ -93,7 +93,9 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
 
     parser = _add_fault_injector_args(parser)
 
-    # SGA narrow waist config exit (no-op without --sga-config).
+    # SGA narrow waist registration (the --sga-* flags): the waist itself
+    # is a no-op unless SGA is enabled via the --sga-* arguments
+    # (sga_enabled).
     from megatron.core import sga_waist
 
     parser = sga_waist.add_sga_args(parser)

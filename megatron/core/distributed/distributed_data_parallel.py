@@ -330,7 +330,8 @@ class DistributedDataParallel(_BaseDataParallel):
                         self.param_to_bucket_group[param] = bucket_group
 
         # SGA narrow waist call point 1: attach bucket state to the plugin
-        # engine (no-op unless --sga-config was given).
+        # engine (no-op unless SGA is enabled via the --sga-* arguments,
+        # i.e. sga_enabled).
         from megatron.core import sga_waist
 
         sga_waist.attach(self)
