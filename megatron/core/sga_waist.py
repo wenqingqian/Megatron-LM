@@ -11,12 +11,12 @@ Config transport (v2): FLAGS ARE THE TRANSPORT. The training entry
 registers the flat ``--sga-*`` vocabulary on megatron's argparse
 (``sga/config/arguments.py`` in the SGA repo, via the entry's
 extra_args_provider); after parsing, the configuration simply LIVES on
-the args namespace as ``sga_*`` attributes. This waist collects those
-attributes — the ``sga_`` prefix and its own override switch are all it
-knows; the vocabulary itself stays in the SGA repo — and hands the flat
-dict to ``build_engine``. There is no JSON string and no re-serialization
-(anything checkpointable rides inside the checkpointed args namespace,
-which is exactly what the v1 JSON bought).
+the args namespace as ``sga_*`` attributes. This module knows nothing
+about those attributes — not even the prefix: it only checks
+``sga_enabled``; ``build_engine`` pulls the megatron namespace itself
+(``megatron.training.get_args``) when it runs. There is no JSON string
+and no re-serialization (anything checkpointable rides inside the
+checkpointed args namespace, which is exactly what the v1 JSON bought).
 
 Contract highlights:
   - Without ``sga_enabled`` true (stock runs carry no SGA attributes at
@@ -56,20 +56,10 @@ def add_sga_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     return parser
 
 
-def _config_from_args():
+def _sga_enabled() -> bool:
     from megatron.training import get_args
 
-    args = get_args()
-    if getattr(args, 'sga_enabled', False) is not True:
-        return None
-    # Collect every sga_* attribute (argparse defaults included — the SGA
-    # package diffs them against its declared defaults). The non-config
-    # sga_ keys are this waist's own override switch and the retired v1
-    # JSON-transport key (still present on old checkpoints); the
-    # fork-registered-key set stays pinned by the SGA-side invariant tests.
-    skip = ('sga_allow_config_override', 'sga_config')
-    return {key: value for key, value in vars(args).items()
-            if key.startswith('sga_') and key not in skip}
+    return getattr(get_args(), 'sga_enabled', False) is True
 
 
 def _get_engine():
@@ -77,8 +67,7 @@ def _get_engine():
     global _engine, _engine_failed
     if _engine is not None or _engine_failed:
         return _engine
-    config = _config_from_args()
-    if config is None:
+    if not _sga_enabled():
         return None
     try:
         from sga.runtime import build_engine
@@ -89,7 +78,7 @@ def _get_engine():
             f'imported ({e}); is the SGA repository on PYTHONPATH '
             '(source env.sh)?'
         ) from e
-    _engine = build_engine(config, api_version=SGA_API_VERSION)
+    _engine = build_engine(api_version=SGA_API_VERSION)
     return _engine
 
 
